@@ -1,8 +1,9 @@
-#include <shader_cross/shader_cross.h>
+#include <shader_cross/shader_cross.hpp>
 
 #include <glslang/Public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
 #include <StandAlone/ResourceLimits.h>
+#include <StandAlone/DirStackFileIncluder.h>
 
 namespace shader_cross {
 
@@ -19,8 +20,14 @@ static GlslangInitializer glslangInitializer;
 
 static inline EShLanguage stageToEShLang(Stage stage) {
     switch (stage) {
+    case Stage::None:
+        return EShLangCount;
     case Stage::Vertex:
         return EShLangVertex;
+    case Stage::TessControl:
+        return EShLangTessControl;
+    case Stage::TessEvaluation:
+        return EShLangTessEvaluation;
     case Stage::Fragment:
         return EShLangFragment;
     case Stage::Geometry:
@@ -28,24 +35,31 @@ static inline EShLanguage stageToEShLang(Stage stage) {
     case Stage::Compute:
         return EShLangCompute;
     }
-    return EShLangCount;
 }
 
 void GLSLAST::TShaderDeleter::operator()(glslang::TShader* shader) {
     delete shader;
 }
 
-bool GLSLAST::Parse(const char* data, std::size_t size, const GLSLOptions& opts, std::string* log) {
+bool GLSLAST::Parse(const char* data, std::size_t size, const Options& opts, std::string* log) {
     shader.reset(new glslang::TShader(stageToEShLang(opts.Stage)));
     const char* shaderStrings[] = { data };
     int shaderStringLens[] = { int(size) };
-    shader->setStringsWithLengths(shaderStrings, shaderStringLens, 1);
-
+    const char* names[] = { opts.Filename };
+    shader->setStringsWithLengthsAndNames(shaderStrings, shaderStringLens, names, 1);
     if (opts.EntryPoint) {
         shader->setEntryPoint(opts.EntryPoint);
     }
+    shader->setPreamble("#extension GL_GOOGLE_include_directive : require\n");
 
-    bool parsed = shader->parse(&glslang::DefaultTBuiltInResource, opts.Version, opts.ForwardCompatible, EShMsgDefault);
+    const TBuiltInResource* resources = &glslang::DefaultTBuiltInResource;
+    EShMessages messages = EShMsgDefault;
+
+    DirStackFileIncluder includer;
+    for (auto& dir : opts.IncludeDirectories) {
+        includer.pushExternalLocalDirectory(dir);
+    }
+    bool parsed = shader->parse(resources, opts.DefaultVersion, false, messages, includer);
     if (log) {
         log->append(shader->getInfoLog());
     }
@@ -56,14 +70,18 @@ bool GLSLAST::Parse(const char* data, std::size_t size, const GLSLOptions& opts,
     return parsed;
 }
 
-bool GLSLAST::Parse(const std::string& s, const GLSLOptions& opts, std::string* log) {
+bool GLSLAST::Parse(const std::string& s, const Options& opts, std::string* log) {
     return this->Parse(s.data(), s.size(), opts, log);
+}
+
+unsigned int toSpvVersion(int version) {
+    return (unsigned int)((version/10) << 16) | ((version % 10) << 8);
 }
 
 bool GLSLAST::ToSPIRV(std::vector<std::uint32_t>* spirv, const SPIRVOptions& opts, std::string* log) const {
     glslang::TIntermediate* intermediate = shader->getIntermediate();
     glslang::SpvVersion spvVersion = intermediate->getSpv();
-    spvVersion.spv = unsigned int(opts.Version);
+    spvVersion.spv = toSpvVersion(opts.Version);
     intermediate->setSpv(spvVersion);
 
     spv::SpvBuildLogger logger;
@@ -78,30 +96,6 @@ bool GLSLAST::ToSPIRV(std::vector<std::uint32_t>* spirv, const SPIRVOptions& opt
         log->append(logger.getAllMessages());
     }
     return true;
-}
-
-bool GLSLAST::ToSPIRVIR(SPIRVIR* spirvIR, const SPIRVOptions& opts, std::string* log) const {
-    std::vector<std::uint32_t> spirv;
-    if (!this->ToSPIRV(&spirv, opts, log)) {
-        return false;
-    }
-    return spirvIR->Parse(spirv, log);
-}
-
-bool GLSLAST::ToHLSL(std::string* hlsl, const HLSLOptions& opts, std::string* log) const {
-    SPIRVIR spirvIR;
-    if (!this->ToSPIRVIR(&spirvIR, SPIRVOptions{}, log)) {
-        return false;
-    }
-    return spirvIR.ToHLSL(hlsl, opts, log);
-}
-
-bool GLSLAST::ToMSL(std::string* msl, const MSLOptions& opts, std::string* log) const {
-    SPIRVIR spirvIR;
-    if (!this->ToSPIRVIR(&spirvIR, SPIRVOptions{}, log)) {
-        return false;
-    }
-    return spirvIR.ToMSL(msl, opts, log);
 }
 
 } // namespace shader_cross

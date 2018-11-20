@@ -16,29 +16,25 @@ class Parser;
 namespace shader_cross {
 
 enum class Stage {
-    Vertex = 0,
-    Fragment,
+    None = 0,
+    Vertex,
+    TessControl,
+    TessEvaluation,
     Geometry,
+    Fragment,
     Compute,
 };
 
 struct GLSLOptions {
-    Stage Stage = Stage::Vertex;
-    const char* EntryPoint = nullptr;
     int Version = 450;
-    bool ForwardCompatible = false;
 };
 
-enum class SPIRVVersion {
-    V1_0 = (1 << 16),
-    V1_1 = (1 << 16) | (1 << 8),
-    V1_2 = (1 << 16) | (2 << 8),
-    V1_3 = (1 << 16) | (3 << 8),
-    //V1_4 = (1 << 16) | (4 << 8),
+struct ESSLOptions {
+    int Version = 320;
 };
 
 struct SPIRVOptions {
-    SPIRVVersion Version = SPIRVVersion::V1_3;
+    int Version = 13;
 };
 
 struct HLSLOptions {
@@ -53,26 +49,26 @@ enum class MSLPlatform {
 //TODO
 struct MSLOptions {
     MSLPlatform Platform = MSLPlatform::OSX;
-    int Major = 1;
-    int Minor = 2;
-    int Patch = 0;
+    int Version = 120;
 };
 
 class SPIRVIR;
 
 class GLSLAST {
 public:
-    bool Parse(const char* data, std::size_t size, const GLSLOptions& opts, std::string* log);
+    struct Options {
+        Stage Stage = Stage::None;
+        int DefaultVersion = 450;
+        const char* EntryPoint = nullptr;
+        const char* Filename = "-";
+        std::vector<std::string> IncludeDirectories;
+    };
 
-    bool Parse(const std::string& s, const GLSLOptions& opts, std::string* log);
+    bool Parse(const char* data, std::size_t size, const Options& opts, std::string* log);
+
+    bool Parse(const std::string& s, const Options& opts, std::string* log);
 
     bool ToSPIRV(std::vector<std::uint32_t>* spirv, const SPIRVOptions& opts, std::string* log) const;
-
-    bool ToSPIRVIR(SPIRVIR* spirvIR, const SPIRVOptions& opts, std::string* log) const;
-
-    bool ToHLSL(std::string* hlsl, const HLSLOptions& opts, std::string* log) const;
-
-    bool ToMSL(std::string* msl, const MSLOptions& opts, std::string* log) const;
 
 private:
     struct TShaderDeleter {
@@ -89,7 +85,7 @@ public:
 
     bool ToGLSL(std::string* glsl, const GLSLOptions& opts, std::string* log) const;
 
-    bool ToGLSLAST(GLSLAST* glslAST, const GLSLOptions& opts, std::string* log) const;
+    bool ToESSL(std::string* essl, const ESSLOptions& opts, std::string* log) const;
 
     bool ToHLSL(std::string* hlsl, const HLSLOptions& opts, std::string* log) const;
 

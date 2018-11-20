@@ -2,12 +2,14 @@ cmake_minimum_required(VERSION 3.11)
 
 project(shader-cross)
 
+option(SHADER_CROSS_SHADERX "Build shaderx" ON)
+
 set(CMAKE_CXX_STANDARD 11)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET FALSE)
 set(FETCHCONTENT_UPDATES_DISCONNECTED TRUE)
-function(Add3rdparyCMake name repo tag)
+function(Add3rdparty name repo tag subdir)
     FetchContent_Declare(
             ${name}
             GIT_REPOSITORY "${repo}"
@@ -17,20 +19,27 @@ function(Add3rdparyCMake name repo tag)
     FetchContent_GetProperties(${name})
     if(NOT ${name}_POPULATED)
         FetchContent_Populate(${name})
-        add_subdirectory(${${name}_SOURCE_DIR} ${${name}_BINARY_DIR})
+        if (subdir)
+            add_subdirectory(${${name}_SOURCE_DIR} ${${name}_BINARY_DIR})
+        endif()
     endif()
 endfunction()
 
 set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "")
-Add3rdparyCMake(glslang https://github.com/KhronosGroup/glslang origin/master)
-Add3rdparyCMake(spirv-cross https://github.com/KhronosGroup/SPIRV-Cross origin/master)
+Add3rdparty(glslang https://github.com/KhronosGroup/glslang master TRUE)
+Add3rdparty(spirv-cross https://github.com/KhronosGroup/SPIRV-Cross master TRUE)
 
-file(GLOB sources LIST_DIRECTORIES false src/* include/shader_cross/*)
+file(GLOB sources LIST_DIRECTORIES FALSE src/* include/shader_cross/*)
 add_library(shader-cross ${sources} "${glslang_SOURCE_DIR}/StandAlone/ResourceLimits.cpp")
 target_include_directories(shader-cross PUBLIC include)
 target_link_libraries(shader-cross PRIVATE glslang SPIRV spirv-cross-glsl spirv-cross-hlsl spirv-cross-msl)
 
-file(GLOB sources LIST_DIRECTORIES false cmd/*)
-add_executable(shader-cross-cmd ${sources})
-target_link_libraries(shader-cross-cmd shader-cross)
+if (SHADER_CROSS_SHADERX)
+    add_subdirectory(shaderx)
+endif()
 
+include(CTest)
+if (BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

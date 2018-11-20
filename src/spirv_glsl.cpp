@@ -12,12 +12,14 @@ bool SPIRVIR::ToGLSL(std::string* glsl, const GLSLOptions& opts, std::string* lo
     return spirvCompile<spirv_cross::CompilerGLSL>(initFn, this->parser->get_parsed_ir(), glsl, log);
 }
 
-bool SPIRVIR::ToGLSLAST(GLSLAST* glslAST, const GLSLOptions& opts, std::string* log) const {
-    std::string glsl;
-    if (!this->ToGLSL(&glsl, opts, log)) {
-        return false;
-    }
-    return glslAST->Parse(glsl, opts, log);
+bool SPIRVIR::ToESSL(std::string* glsl, const ESSLOptions& opts, std::string* log) const {
+    auto initFn = [&opts](spirv_cross::CompilerGLSL& compiler) {
+        spirv_cross::CompilerGLSL::Options glslOpts = compiler.get_common_options();
+        glslOpts.es = true;
+        glslOpts.version = opts.Version;
+        compiler.set_common_options(glslOpts);
+    };
+    return spirvCompile<spirv_cross::CompilerGLSL>(initFn, this->parser->get_parsed_ir(), glsl, log);
 }
 
 } // namespace shader_cross

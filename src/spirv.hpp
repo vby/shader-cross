@@ -1,7 +1,7 @@
 #ifndef SHADER_CROSS_SPIRV_H
 #define SHADER_CROSS_SPIRV_H
 
-#include <shader_cross/shader_cross.h>
+#include <shader_cross/shader_cross.hpp>
 #include <spirv_common.hpp>
 #include <spirv_parser.hpp>
 
