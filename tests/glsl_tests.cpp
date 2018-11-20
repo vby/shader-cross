@@ -28,7 +28,7 @@ void main() {
         shader_cross::GLSLAST::Options opts;
         opts.Stage = shader_cross::Stage::Vertex;
         std::string log;
-        ASSERT_TRUE(glslAST.Parse(transformVSglsl, opts, &log)) << log;
+        ASSERT_TRUE(glslAST.Parse({ transformVSglsl }, opts, &log)) << log;
     }
 
     std::vector<std::uint32_t> spirv;

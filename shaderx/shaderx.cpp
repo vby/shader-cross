@@ -1,20 +1,32 @@
 #include <shader_cross/shader_cross.hpp>
-#include <cxxopts.hpp>
 #include <iostream>
 #include <fstream>
 #include <iomanip>
 
+#ifdef _MSC_VER
+__pragma(warning(push))
+__pragma(warning(disable: 4819))
+__pragma(warning(disable: 4018))
+__pragma(warning(disable: 4267))
+#include <cxxopts.hpp>
+__pragma(warning(pop))
+#else
+#include <cxxopts.hpp>
+#endif // _MSC_VER
+
 static cxxopts::Options options("shaderx", "Shader languages cross compiler");
 
 void initOptions() {
+    options.parse_positional("inputs");
+    options.positional_help("file...");
     auto addOpt = options.add_options();
-    addOpt("S,stage", "Shader stage: vs, fs, gs, cs", cxxopts::value<std::string>()->default_value(""), "<stage>");
-    addOpt("I,input", "Read input from <file>", cxxopts::value<std::string>()->default_value("-"), "<file>");
+    addOpt("inputs", "", cxxopts::value<std::vector<std::string>>());
+    addOpt("S,stage", "Shader stage: vs, tc, te, fs, gs, cs", cxxopts::value<std::string>()->default_value(""), "<stage>");
     addOpt("O,output", "Write output to <file>", cxxopts::value<std::string>()->default_value("-"), "<file>");
     addOpt("F,from", "From language: glsl, spirv", cxxopts::value<std::string>()->default_value("glsl"), "<lang>");
     addOpt("T,target", "Target language: spirv, glsl, essl, hlsl, msl", cxxopts::value<std::string>()->default_value("spirv"), "<lang>");
     addOpt("V,version", "Target language version", cxxopts::value<std::string>()->default_value(""), "<ver>");
-    //addOpt("I,include", "Add directory to include search path", cxxopts::value<std::vector<std::string>>(), "<dir>");
+    addOpt("I,include", "Add directory to include search path", cxxopts::value<std::vector<std::string>>(), "<dir>");
     addOpt("h,help", "Display available options");
 }
 
@@ -26,8 +38,18 @@ int showHelp(const char* reason = nullptr) {
     return 0;
 }
 
+int printError(const char* err) {
+    std::cerr << err << std::endl;
+    return 1;
+}
+
 int printError(const std::string& err) {
     std::cerr << err << std::endl;
+    return 1;
+}
+
+int printOpenFileError(const std::string& filename) {
+    std::cerr << "Can't open file '" << filename << "'" << std::endl;
     return 1;
 }
 
@@ -37,40 +59,58 @@ void printLog(const std::string& log) {
     }
 }
 
-shader_cross::Stage extToStage(const std::string& ext) {
-    if (ext == "vert" || ext == "vs") {
+shader_cross::Stage toStage(const std::string& stage) {
+    if (stage == "vs") {
         return shader_cross::Stage::Vertex;
-    } else if (ext == "tesc" || ext == "tcs") {
+    } else if (stage == "tc") {
         return shader_cross::Stage::TessControl;
-    } else if (ext == "tese" || ext == "tes") {
+    } else if (stage == "te") {
         return shader_cross::Stage::TessEvaluation;
-    } else if (ext == "geom" || ext == "gs") {
+    } else if (stage == "gs") {
         return shader_cross::Stage::Geometry;
-    } else if (ext == "frag" || ext == "fs") {
+    } else if (stage == "fs") {
         return shader_cross::Stage::Fragment;
-    } else if (ext == "comp" || ext == "cs") {
+    } else if (stage == "cs") {
         return shader_cross::Stage::Compute;
     }
     return shader_cross::Stage::None;
 }
 
-shader_cross::Stage toStage(const std::string& stage, const std::string& input) {
-    if (stage == "") {
-        auto pos = input.rfind('.');
-        if (pos != std::string::npos) {
-            return extToStage(input.substr(pos+1));
-        }
-        return shader_cross::Stage::None;
-    } else if (stage == "vs") {
+shader_cross::Stage extToStage(const std::string& ext) {
+    if (ext == "vert") {
         return shader_cross::Stage::Vertex;
-    } else if (stage == "fs") {
-        return shader_cross::Stage::Fragment;
-    } else if (stage == "gs") {
+    } else if (ext == "tesc") {
+        return shader_cross::Stage::TessControl;
+    } else if (ext == "tese") {
+        return shader_cross::Stage::TessEvaluation;
+    } else if (ext == "geom") {
         return shader_cross::Stage::Geometry;
-    } else if (stage == "cs") {
+    } else if (ext == "frag") {
+        return shader_cross::Stage::Fragment;
+    } else if (ext == "comp") {
         return shader_cross::Stage::Compute;
     }
+    return toStage(ext);
+}
+
+shader_cross::Stage filenamesToStage(const std::vector<std::string>& filenames) {
+    for (auto& filename : filenames) {
+        auto pos = filename.rfind('.');
+        if (pos != std::string::npos) {
+            auto stage = extToStage(filename.substr(pos + 1));
+            if (stage != shader_cross::Stage::None) {
+                return stage;
+            }
+        }
+    }
     return shader_cross::Stage::None;
+}
+
+shader_cross::Stage toStage(const std::string& stage, const std::vector<std::string>& filenames) {
+    if (stage == "") {
+        return filenamesToStage(filenames);
+    }
+    return toStage(stage);
 }
 
 int toVersion(const std::string& ver) {
@@ -85,7 +125,26 @@ std::string readToString(std::istream& is) {
     std::vector<char> buf(1024);
     while (!is.eof()) {
         is.read(buf.data(), buf.size());
-        result.append(buf.data(), is.gcount());
+        result.append(buf.data(), std::size_t(is.gcount()));
+    }
+    return result;
+}
+
+std::size_t readToStrings(std::vector<std::string>* outStrings, const std::vector<std::string>& filenames) {
+    for (std::size_t i = 0; i < filenames.size(); ++i) {
+        std::ifstream ifs(filenames[i]);
+        if (!ifs) {
+            return i;
+        }
+        outStrings->emplace_back(readToString(ifs));
+    }
+    return filenames.size();
+}
+
+std::string joinStrings(const std::vector<std::string>& strings) {
+    std::string result;
+    for (auto& s : strings) {
+        result.append(s);
     }
     return result;
 }
@@ -117,31 +176,61 @@ void writeString(std::ostream* os, const std::string& str) {
 
 int main(int argc, char** argv) {
     initOptions();
-    auto opts = options.parse(argc, argv);
-    if (opts.count("help")) {
-        return showHelp();
-    }
 
-    std::string stageStr = opts["stage"].as<std::string>();
-    std::string input = opts["input"].as<std::string>();
-    std::string output = opts["output"].as<std::string>();
-    std::string from = opts["from"].as<std::string>();
-    std::string target = opts["target"].as<std::string>();
-    std::string versionStr = opts["version"].as<std::string>();
+    std::string stageStr;
+    std::vector<std::string> inputs;
+    std::string output;
+    std::string from;
+    std::string target;
+    int version;
+    std::vector<std::string> includes;
 
-    int version = toVersion(versionStr);
-
-    std::string inputContent;
-    if (input == "-") {
-        inputContent = readToString(std::cin);
-    } else {
-        std::ifstream ifs(input);
-        if (!ifs) {
-            std::cerr << "Open file " << input << " error" << std::endl;
-            return 1;
+    try {
+        auto opts = options.parse(argc, argv);
+        if (opts.count("help")) {
+            return showHelp();
         }
-        inputContent = readToString(ifs);
+        if (opts.count("inputs")) {
+            inputs = opts["inputs"].as<std::vector<std::string>>();
+        }
+        stageStr = opts["stage"].as<std::string>();
+        output = opts["output"].as<std::string>();
+        from = opts["from"].as<std::string>();
+        target = opts["target"].as<std::string>();
+        version = toVersion(opts["version"].as<std::string>());
+        if (opts.count("include")) {
+            includes = opts["include"].as<std::vector<std::string>>();
+        }
+    } catch (const cxxopts::missing_argument_exception& e) {
+        return printError(e.what());
+    } catch (const cxxopts::option_not_exists_exception& e) {
+        return printError(e.what());
     }
+
+    shader_cross::Stage stage = shader_cross::Stage::None;
+    if (from == "glsl") {
+        stage = toStage(stageStr, inputs);
+        if (stage == shader_cross::Stage::None) {
+            if (!stageStr.empty()) {
+                std::cerr << "Unknown stage '" << stageStr << "'" << std::endl;
+                return 1;
+            }
+            return printError("Unknown stage");
+        }
+    }
+    
+    bool inputFromStdin = false;
+    std::vector<std::string> inputContents;
+    if (inputs.empty() || inputs[0] == "-") {
+        inputContents.emplace_back(readToString(std::cin));
+        inputFromStdin = true;
+    } else {
+        auto pos = readToStrings(&inputContents, inputs);
+        if (pos != inputs.size()) {
+            return printOpenFileError(inputs[pos]);
+        }
+    }
+
     std::ostream* outputStream;
     std::ofstream ofs;
     if (output == "-") {
@@ -149,8 +238,7 @@ int main(int argc, char** argv) {
     } else {
         ofs.open(output);
         if (!ofs) {
-            std::cerr << "Open file " << output << " error" << std::endl;
-            return 1;
+            return printOpenFileError(output);
         }
         outputStream = &ofs;
     }
@@ -160,15 +248,14 @@ int main(int argc, char** argv) {
 
     if (from == "glsl") {
         {
-            shader_cross::Stage stage = toStage(stageStr, input);
-            if (stage == shader_cross::Stage::None) {
-                return printError("Unknown stage");
-            }
             shader_cross::GLSLAST::Options opts;
             opts.Stage = stage;
-            opts.Filename = input.c_str();
+            if (!inputFromStdin) {
+                opts.Names = inputs;
+            }
+            opts.IncludeDirectories = includes;
             std::string log;
-            if (!glslAST.Parse(inputContent, opts, &log)) {
+            if (!glslAST.Parse(inputContents, opts, &log)) {
                 return printError(log);
             }
             printLog(log);
@@ -195,12 +282,13 @@ int main(int argc, char** argv) {
         }
         printLog(log);
     } else if (from == "spirv") {
+        auto inputContent = joinStrings(inputContents);
         if (target == "spirv") {
             writeSPIRVString(outputStream, inputContent);
             return 0;
         }
         std::string log;
-        if (!spirvIR.Parse(reinterpret_cast<const std::uint32_t*>(inputContent.data()), inputContent.size(), &log)) {
+        if (!spirvIR.Parse(reinterpret_cast<const std::uint32_t*>(inputContents.data()), inputContents.size(), &log)) {
             return printError(log);
         }
         printLog(log);

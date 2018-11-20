@@ -59,14 +59,17 @@ public:
     struct Options {
         Stage Stage = Stage::None;
         int DefaultVersion = 450;
-        const char* EntryPoint = nullptr;
-        const char* Filename = "-";
+        std::string EntryPoint = "main";
+        bool EnableInclude = true;
+        std::vector<std::string> Names;
         std::vector<std::string> IncludeDirectories;
     };
 
-    bool Parse(const char* data, std::size_t size, const Options& opts, std::string* log);
+    bool Parse(const char** glsls, const std::size_t* sizes, int num, const Options& opts, std::string* log);
 
-    bool Parse(const std::string& s, const Options& opts, std::string* log);
+    bool Parse(const std::string* glsls, int num, const Options& opts, std::string* log);
+
+    bool Parse(const std::vector<std::string>& glsls, const Options& opts, std::string* log);
 
     bool ToSPIRV(std::vector<std::uint32_t>* spirv, const SPIRVOptions& opts, std::string* log) const;
 

@@ -5,6 +5,8 @@
 #include <StandAlone/ResourceLimits.h>
 #include <StandAlone/DirStackFileIncluder.h>
 
+#include <algorithm>
+
 namespace shader_cross {
 
 struct GlslangInitializer {
@@ -35,43 +37,83 @@ static inline EShLanguage stageToEShLang(Stage stage) {
     case Stage::Compute:
         return EShLangCompute;
     }
+    return EShLangCount;
 }
 
 void GLSLAST::TShaderDeleter::operator()(glslang::TShader* shader) {
     delete shader;
 }
 
-bool GLSLAST::Parse(const char* data, std::size_t size, const Options& opts, std::string* log) {
-    shader.reset(new glslang::TShader(stageToEShLang(opts.Stage)));
-    const char* shaderStrings[] = { data };
-    int shaderStringLens[] = { int(size) };
-    const char* names[] = { opts.Filename };
-    shader->setStringsWithLengthsAndNames(shaderStrings, shaderStringLens, names, 1);
-    if (opts.EntryPoint) {
-        shader->setEntryPoint(opts.EntryPoint);
+std::vector<const char*> toGlslangStrings(const std::string* strings, std::size_t size) {
+    std::vector<const char*> cStrings(strings->size());
+    for (std::size_t i = 0; i < strings->size(); ++i) {
+        cStrings[i] = strings[i].c_str();
     }
-    shader->setPreamble("#extension GL_GOOGLE_include_directive : require\n");
+    return cStrings;
+}
 
+std::string defaultFilenameOf(int index) {
+    std::string name;
+    name.append("<");
+    name.append(std::to_string(index));
+    name.append(">");
+    return name;
+}
+
+bool GLSLAST::Parse(const char** glsls, const std::size_t* sizes, int num, const Options& opts, std::string* log) {
     const TBuiltInResource* resources = &glslang::DefaultTBuiltInResource;
     EShMessages messages = EShMsgDefault;
-
-    DirStackFileIncluder includer;
-    for (auto& dir : opts.IncludeDirectories) {
-        includer.pushExternalLocalDirectory(dir);
+    shader.reset(new glslang::TShader(stageToEShLang(opts.Stage)));
+    // Sources
+    std::vector<int> lens(num);
+    for (int i = 0; i < num; ++i) {
+        lens[i] = int(sizes[i]);
     }
-    bool parsed = shader->parse(resources, opts.DefaultVersion, false, messages, includer);
+    std::vector<std::string> names = opts.Names;
+    names.resize(num);
+    for (int i = int(opts.Names.size()); i < num; ++i) {
+        names[i] = defaultFilenameOf(i);
+    }
+    std::vector<const char*> cNames = toGlslangStrings(names.data(), names.size());
+    shader->setStringsWithLengthsAndNames(glsls, lens.data(), cNames.data(), num);
+    // EntryPoint
+    if (!opts.EntryPoint.empty()) {
+        shader->setEntryPoint(opts.EntryPoint.c_str());
+    }
+    bool parsed = false;
+    // Include & Parse
+    if (opts.EnableInclude) {
+        shader->setPreamble("#extension GL_GOOGLE_include_directive : enable\n");
+        DirStackFileIncluder includer;
+        for (auto& dir : opts.IncludeDirectories) {
+            includer.pushExternalLocalDirectory(dir);
+        }
+        parsed = shader->parse(resources, opts.DefaultVersion, false, messages, includer);
+    } else {
+        parsed = shader->parse(resources, opts.DefaultVersion, false, messages);
+    }
     if (log) {
         log->append(shader->getInfoLog());
+        log->append(shader->getInfoDebugLog());
     }
     //glslang::TProgram program;
-    //program.addShader(&shader);
+    //program.addShader(shader.get());
     //program.link(messages);
     //program.mapIO();
     return parsed;
 }
 
-bool GLSLAST::Parse(const std::string& s, const Options& opts, std::string* log) {
-    return this->Parse(s.data(), s.size(), opts, log);
+bool GLSLAST::Parse(const std::string* glsls, int num, const Options& opts, std::string* log) {
+    std::vector<const char*> cGlsls = toGlslangStrings(glsls, num);
+    std::vector<std::size_t> sizes(num);
+    for (int i = 0; i < num; ++i) {
+        sizes[i] = glsls[i].size();
+    }
+    return this->Parse(cGlsls.data(), sizes.data(), num, opts, log);
+}
+
+bool GLSLAST::Parse(const std::vector<std::string>& glsls, const Options& opts, std::string* log) {
+    return this->Parse(glsls.data(), int(glsls.size()), opts, log);
 }
 
 unsigned int toSpvVersion(int version) {
