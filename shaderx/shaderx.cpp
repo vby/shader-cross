@@ -167,7 +167,7 @@ void writeSPIRV(std::ostream* os, const std::uint32_t* spirv, std::size_t size) 
 }
 
 void writeSPIRVString(std::ostream* os, const std::string& str) {
-    writeSPIRV(os, reinterpret_cast<const std::uint32_t*>(str.data()), str.size());
+    writeSPIRV(os, reinterpret_cast<const std::uint32_t*>(str.data()), str.size()/4);
 }
 
 void writeString(std::ostream* os, const std::string& str) {
